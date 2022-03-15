@@ -8,29 +8,34 @@ namespace CKJMAnalyzer
    {
       static async Task Main(string[] args)
       {
+         Console.WriteLine("CKJM Analyzer begin...");
          Process p = new Process();
          p.StartInfo.UseShellExecute = false;
+         p.StartInfo.CreateNoWindow = true;
          p.StartInfo.RedirectStandardOutput = true;
          p.StartInfo.FileName = "ckjm_analysis.bat";
 
          var projectBasePath = ".\\projects\\";
          var projects = Directory.GetDirectories(Path.Combine(Environment.CurrentDirectory, "projects"));
+         int totalProjects = projects.Length;
+         int currentProject = 1;
 
          var csv = new StringBuilder();
-         csv.AppendLine("Project,DI,MAI,DIW-MAI,LOC,CBO,DIW-CBO");
+         csv.AppendLine("Project,DI,MAI,DIW-MAI,LOC,CBO,DIW-CBO,DAM,MOA,DIT,MFA");
 
          foreach (var project in projects)
          {
+            Console.WriteLine($"Analyzing project {currentProject++} of {totalProjects}");
             // Reset lists and dictionaries
             Initialize();
             // Path for specific path within `projects` folder
             var projectPath = projectBasePath + project.Split("\\").Last();
 
             var classFiles = Directory.EnumerateFiles(projectPath, "*.class", SearchOption.AllDirectories).ToList();
-            File.WriteAllText("fileNames.txt", String.Join("\n", classFiles));
+            File.WriteAllText("fileNames.txt", string.Join("\n", classFiles));
             
             p.Start();
-
+            
             var ckjm_output = p.StandardOutput.ReadToEnd().Split("\r\n");
             // Loop through output, consume params and metrics
             foreach (var output_line in ckjm_output)
@@ -79,7 +84,7 @@ namespace CKJMAnalyzer
             var diProportion = MetricTotals["DI_PARAMS"].Accumulator / MetricTotals["TOTAL_PARAMS"].Accumulator;
 
             var newLine =
-               $"{project.Split("\\").Last()},{diProportion.ToString(CultureInfo.InvariantCulture)},{maintainability.ToString(CultureInfo.InvariantCulture)},{diMaintainability.ToString(CultureInfo.InvariantCulture)},{MetricTotals["LOC"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["CBO"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DIW_CBO"].Mean.ToString(CultureInfo.InvariantCulture)}";
+               $"{project.Split("\\").Last()},{diProportion.ToString(CultureInfo.InvariantCulture)},{maintainability.ToString(CultureInfo.InvariantCulture)},{diMaintainability.ToString(CultureInfo.InvariantCulture)},{MetricTotals["LOC"].Accumulator.ToString(CultureInfo.InvariantCulture)},{MetricTotals["CBO"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DIW_CBO"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DAM"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["MOA"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DIT"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["MFA"].Mean.ToString(CultureInfo.InvariantCulture)}";
 
             csv.AppendLine(newLine);
          }
