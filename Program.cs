@@ -99,7 +99,7 @@ namespace CKJMAnalyzer
 
             var diProportion = MetricTotals["CBO"].Accumulator == 0
                ? 0
-               : MetricTotals["DI_PARAMS"].Accumulator / MetricTotals["CBO"].Accumulator;
+               : MetricTotals["DI_PARAMS"].Accumulator * 2 / MetricTotals["CBO"].Accumulator;
 
             var newLine =
                $"{project.Split("\\").Last()},{diProportion.ToString(CultureInfo.InvariantCulture)},{maintainability.ToString(CultureInfo.InvariantCulture)},{diMaintainability.ToString(CultureInfo.InvariantCulture)},{MetricTotals["LOC"].Accumulator.ToString(CultureInfo.InvariantCulture)},{MetricTotals["CBO"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DIW_CBO"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DAM"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["MOA"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DIT"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["MFA"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["LCOM"].Mean.ToString(CultureInfo.InvariantCulture)}";
