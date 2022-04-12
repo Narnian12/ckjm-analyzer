@@ -236,7 +236,7 @@ namespace CKJMAnalyzer
             var nonPrimitiveParams = MethodParams.Intersect(classNames).ToList();
             // Remove duplicates
             nonPrimitiveParams = nonPrimitiveParams.Distinct().ToList();
-            DiwCbo = MetricNameValue["CBO"] - (nonPrimitiveParams.Count / 2.0);
+            DiwCbo = MetricNameValue["CBO"] - nonPrimitiveParams.Count;
             DiParams = nonPrimitiveParams.Count;
          }
       }
