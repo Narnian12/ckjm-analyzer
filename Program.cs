@@ -46,8 +46,10 @@ namespace CKJMAnalyzer
             //    }
             // }
 
-            var classFiles = Directory.EnumerateFiles(projectPath, "*.class", SearchOption.AllDirectories).ToList();
-            File.WriteAllText("fileNames.txt", string.Join("\n", classFiles));
+            var directory = new DirectoryInfo(projectPath);
+            var masks = new[] {"*.class", "*.jar"};
+            var files = masks.SelectMany(m => directory.EnumerateFiles(m)).ToList();
+            File.WriteAllText("fileNames.txt", string.Join("\n", files));
             
             p.Start();
             
@@ -80,7 +82,7 @@ namespace CKJMAnalyzer
                   }
                }
             }
-
+            
             // Analyze DiwCbo using classNames list
             foreach (var metricData in ClassNameToMetricData.Values)
             {

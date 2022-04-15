@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "ckjm-analyzer": {
+      "commandName": "Project",
+      "commandLineArgs": "-j"
+    }
+  }
+}
