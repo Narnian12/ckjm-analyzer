@@ -1,14 +1,30 @@
 ﻿using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using CommandLine;
+
 // using System.Xml.Linq;
 
 namespace CKJMAnalyzer
 {
    class Program
    {
-      static async Task Main()
+      static async Task Main(string[] args)
       {
+         var options = default(CKJMAnalyzerOptions);
+         Parser.Default.ParseArguments<CKJMAnalyzerOptions>(args)
+            .WithParsed(parsedOptions =>
+            {
+               options = parsedOptions;
+            });
+
+         if (string.IsNullOrWhiteSpace(options?.Extension))
+         {
+            Console.WriteLine("Error: Must define an extension using -e and a valid extension, such as `class` or `jar`");
+         }
+
+         var fileExtension = "*." + options?.Extension;
+
          Console.WriteLine("CKJM Analyzer begin...");
          Process p = new Process();
          p.StartInfo.UseShellExecute = false;
@@ -22,7 +38,7 @@ namespace CKJMAnalyzer
          int currentProject = 1;
 
          var csv = new StringBuilder();
-         csv.AppendLine("Project,DI,MAI,DIW-MAI,LOC,CBO,DIW-CBO,DAM,MOA,DIT,MFA,LCOM");
+         csv.AppendLine("Project,DI,MAI,DMMAI,LOC,CBO,DCBO,LCOM,RFC,NCBO,NDCBO,NLCOM,NRFC");
 
          foreach (var project in projects)
          {
@@ -45,11 +61,9 @@ namespace CKJMAnalyzer
             //       }
             //    }
             // }
-
-            var directory = new DirectoryInfo(projectPath);
-            var masks = new[] {"*.class", "*.jar"};
-            var files = masks.SelectMany(m => directory.EnumerateFiles(m)).ToList();
-            File.WriteAllText("fileNames.txt", string.Join("\n", files));
+            
+            var sourceFiles = Directory.EnumerateFiles(projectPath, fileExtension, SearchOption.AllDirectories).ToList();
+            File.WriteAllText("fileNames.txt", string.Join("\n", sourceFiles));
             
             p.Start();
             
@@ -80,6 +94,10 @@ namespace CKJMAnalyzer
                   {
                      ClassNameToMetricData[className].ConsumeMetrics(line);
                   }
+                  else if (analysisType == "methods")
+                  {
+                     NumberOfMethods += int.Parse(line[0]);
+                  }
                }
             }
             
@@ -94,17 +112,25 @@ namespace CKJMAnalyzer
             {
                metric.ComputeMean();
             }
-
-            // Compute maintainability
-            var maintainability = ComputeMaintainability(MetricTotals);
-            var diMaintainability = ComputeMaintainability(MetricTotals, true);
-
+            
             var diProportion = MetricTotals["CBO"].Accumulator == 0
                ? 0
                : MetricTotals["DI_PARAMS"].Accumulator * 2 / MetricTotals["CBO"].Accumulator;
 
+            // Normalize CBO using module complexity (CM) equation CM = 1 - (1 / (1 + IS)), where IS is coupling complexity
+            var normalizedCBO = 1 - (1 / (1 + MetricTotals["CBO"].Mean));
+            var normalizedDCBO = 1 - (1 / (1 + MetricTotals["DCBO"].Mean));
+            // Normalize LCOM with bestfit
+            var normalizedLCOM = MetricTotals["LCOM"].Mean == 0 ? 0 : 1.0 / MetricTotals["LCOM"].Mean;
+            // Normalize RFC using module complexity (CM) equation above
+            var normalizedRFC = 1 - (1 / (1 + MetricTotals["RFC"].Mean));
+
+            // Compute maintainability
+            var maintainability = ComputeMaintainability(normalizedCBO, normalizedLCOM, normalizedRFC);
+            var diMaintainability = ComputeMaintainability(normalizedDCBO, normalizedLCOM, normalizedRFC);
+
             var newLine =
-               $"{project.Split("\\").Last()},{diProportion.ToString(CultureInfo.InvariantCulture)},{maintainability.ToString(CultureInfo.InvariantCulture)},{diMaintainability.ToString(CultureInfo.InvariantCulture)},{MetricTotals["LOC"].Accumulator.ToString(CultureInfo.InvariantCulture)},{MetricTotals["CBO"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DIW_CBO"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DAM"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["MOA"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DIT"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["MFA"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["LCOM"].Mean.ToString(CultureInfo.InvariantCulture)}";
+               $"{project.Split("\\").Last()},{diProportion.ToString(CultureInfo.InvariantCulture)},{maintainability.ToString(CultureInfo.InvariantCulture)},{diMaintainability.ToString(CultureInfo.InvariantCulture)},{MetricTotals["LOC"].Accumulator.ToString(CultureInfo.InvariantCulture)},{MetricTotals["CBO"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DCBO"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["LCOM"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["RFC"].Mean.ToString(CultureInfo.InvariantCulture)},{normalizedCBO.ToString(CultureInfo.InvariantCulture)},{normalizedDCBO.ToString(CultureInfo.InvariantCulture)},{normalizedLCOM.ToString(CultureInfo.InvariantCulture)},{normalizedRFC.ToString(CultureInfo.InvariantCulture)}";
 
             csv.AppendLine(newLine);
          }
@@ -115,20 +141,19 @@ namespace CKJMAnalyzer
       public static Dictionary<string, MetricData> ClassNameToMetricData { get; set; } = new();
       public static List<string> ClassNames { get; set; } = new();
       public static Dictionary<string, Metric> MetricTotals { get; set; } = new();
+      public static double NumberOfMethods { get; set; } = 0;
 
       public static void Initialize()
       {
          ClassNameToMetricData.Clear();
          ClassNames.Clear();
          MetricTotals.Clear();
+         NumberOfMethods = 0;
          MetricTotals["CBO"] = new Metric("CBO");
          MetricTotals["LOC"] = new Metric("LOC");
-         MetricTotals["DIW_CBO"] = new Metric("DIW_CBO");
-         MetricTotals["DAM"] = new Metric("DAM");
-         MetricTotals["MOA"] = new Metric("MOA");
-         MetricTotals["DIT"] = new Metric("DIT");
-         MetricTotals["MFA"] = new Metric("MFA");
+         MetricTotals["DCBO"] = new Metric("DCBO");
          MetricTotals["LCOM"] = new Metric("LCOM");
+         MetricTotals["RFC"] = new Metric("RFC");
          MetricTotals["DI_PARAMS"] = new Metric("DI_PARAMS");
          MetricTotals["TOTAL_PARAMS"] = new Metric("TOTAL_PARAMS");
       }
@@ -137,21 +162,16 @@ namespace CKJMAnalyzer
       {
          MetricTotals["CBO"].Add(data.MetricNameValue["CBO"]);
          MetricTotals["LOC"].Add(data.MetricNameValue["LOC"]);
-         MetricTotals["DIW_CBO"].Add(data.DiwCbo);
-         MetricTotals["DAM"].Add(data.MetricNameValue["DAM"]);
-         MetricTotals["MOA"].Add(data.MetricNameValue["MOA"]);
-         MetricTotals["DIT"].Add(data.MetricNameValue["DIT"]);
-         MetricTotals["MFA"].Add(data.MetricNameValue["MFA"]);
+         MetricTotals["DCBO"].Add(data.DiwCbo);
          MetricTotals["LCOM"].Add(data.MetricNameValue["LCOM"]);
+         MetricTotals["RFC"].Add(data.MetricNameValue["RFC"]);
          MetricTotals["DI_PARAMS"].Add(data.DiParams);
          MetricTotals["TOTAL_PARAMS"].Add(data.MethodParams.Count);
       }
 
-      public static double ComputeMaintainability(Dictionary<string, Metric> metricTotals, bool usingDI = false)
+      public static double ComputeMaintainability(double cbo, double lcom, double rfc)
       {
-         double meanCbo = usingDI ? metricTotals["DIW_CBO"].Mean : metricTotals["CBO"].Mean;
-         return (0.5 * ((0.25 * metricTotals["DAM"].Mean) - (0.25 * meanCbo) + (0.5 * metricTotals["MOA"].Mean))) +
-                (0.5 * ((0.5 * metricTotals["DIT"].Mean) - (0.5 * meanCbo) + (0.5 * metricTotals["MFA"].Mean)));
+         return 1 - (cbo / 3) - (lcom / 3) - (rfc / 3);
       }
 
       public class Metric
