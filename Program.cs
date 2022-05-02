@@ -38,7 +38,7 @@ namespace CKJMAnalyzer
          int currentProject = 1;
 
          var csv = new StringBuilder();
-         csv.AppendLine("Project,DI,MAI,DMMAI,LOC,CBO,DCBO,LCOM,RFC,NCBO,NDCBO,NLCOM,NRFC");
+         csv.AppendLine("Project,DI,MAI,DMAI,LOC,CBO,DCBO,LCOM,RFC,NCBO,NDCBO,NLCOM,NRFC");
 
          foreach (var project in projects)
          {
