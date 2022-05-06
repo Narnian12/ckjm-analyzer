@@ -21,6 +21,7 @@ namespace CKJMAnalyzer
          if (string.IsNullOrWhiteSpace(options?.Extension))
          {
             Console.WriteLine("Error: Must define an extension using -e and a valid extension, such as `class` or `jar`");
+            return;
          }
 
          var fileExtension = "*." + options?.Extension;
@@ -121,7 +122,7 @@ namespace CKJMAnalyzer
             var normalizedCBO = 1 - (1 / (1 + MetricTotals["CBO"].Mean));
             var normalizedDCBO = 1 - (1 / (1 + MetricTotals["DCBO"].Mean));
             // Normalize LCOM with bestfit
-            var normalizedLCOM = MetricTotals["LCOM"].Mean == 0 ? 0 : 1.0 / MetricTotals["LCOM"].Mean;
+            var normalizedLCOM = MetricTotals["LCOM"].Mean < 1 ? 0 : 1.0 / MetricTotals["LCOM"].Mean;
             // Normalize RFC using module complexity (CM) equation above
             var normalizedRFC = 1 - (1 / (1 + MetricTotals["RFC"].Mean));
 
@@ -169,9 +170,9 @@ namespace CKJMAnalyzer
          MetricTotals["TOTAL_PARAMS"].Add(data.MethodParams.Count);
       }
 
-      public static double ComputeMaintainability(double cbo, double lcom, double rfc)
+      public static double ComputeMaintainability(double nCbo, double nLcom, double nRfc)
       {
-         return 1 - (cbo / 3) - (lcom / 3) - (rfc / 3);
+         return 1 - (nCbo / 3) - (nLcom / 3) - (nRfc / 3);
       }
 
       public class Metric

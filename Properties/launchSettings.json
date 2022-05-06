@@ -2,7 +2,7 @@
   "profiles": {
     "ckjm-analyzer": {
       "commandName": "Project",
-      "commandLineArgs": "-j"
+      "commandLineArgs": "-e class"
     }
   }
 }
