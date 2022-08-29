@@ -2,8 +2,8 @@
 using System.Globalization;
 using System.Text;
 using CommandLine;
-
-// using System.Xml.Linq;
+using System.Xml.Linq;
+using CKJMAnalyzer.Models;
 
 namespace CKJMAnalyzer
 {
@@ -39,7 +39,7 @@ namespace CKJMAnalyzer
          int currentProject = 1;
 
          var csv = new StringBuilder();
-         csv.AppendLine("Project,DI,MAI,DMAI,LOC,CBO,DCBO,LCOM,RFC,NCBO,NDCBO,NLCOM,NRFC");
+         csv.AppendLine("Project,DI,LOC,CBO,NCBO,DCBO,NDCBO,CA,CE,DCE");
 
          foreach (var project in projects)
          {
@@ -49,20 +49,28 @@ namespace CKJMAnalyzer
             // Path for specific path within `projects` folder
             var projectPath = projectBasePath + project.Split("\\").Last();
 
-            // var xmlFiles = Directory.EnumerateFiles(projectPath, "*.xml", SearchOption.AllDirectories).ToList();
-            // foreach (var xmlFile in xmlFiles)
-            // {
-            //    var xml = XElement.Load(xmlFile);
-            //    var descendants = xml.Descendants();
-            //    foreach (var descendant in descendants)
-            //    {
-            //       if (descendant.Name.ToString().Contains("bean"))
-            //       {
-            //          var beanAttributes = descendant.Attributes();
-            //       }
-            //    }
-            // }
-            
+            // Accumulate Java beans XML DI
+            var xmlFiles = Directory.EnumerateFiles(projectPath, "*.xml", SearchOption.AllDirectories).ToList();
+            foreach ( var xmlFile in xmlFiles )
+            {
+               var xml = XElement.Load(xmlFile);
+               var descendants = xml.Descendants();
+               foreach ( var descendant in descendants )
+               {
+                  if ( descendant.Name.ToString().Contains( "bean" ) )
+                  {
+                     var beanAttributes = descendant.Attributes();
+                     foreach (var attr in beanAttributes)
+                     {
+                        if (attr.Name.LocalName.ToLower().Equals("class"))
+                        {
+                           XmlConcreteClasses.Add(attr.Value);
+                        }
+                     }
+                  }
+               }
+            }
+
             var sourceFiles = Directory.EnumerateFiles(projectPath, fileExtension, SearchOption.AllDirectories).ToList();
             File.WriteAllText("fileNames.txt", string.Join("\n", sourceFiles));
             
@@ -87,51 +95,55 @@ namespace CKJMAnalyzer
                   line.RemoveAt(0);
                   var analysisType = line.First();
                   line.RemoveAt(0);
-                  if (analysisType == "params")
+                  if (line.Count() == 0)
                   {
-                     ClassNameToMetricData[className].AddParams(line);
+                     continue;
                   }
-                  else if (analysisType == "metrics")
+                  switch (analysisType)
                   {
-                     ClassNameToMetricData[className].ConsumeMetrics(line);
+                     case "parameter_types":
+                        ClassNameToMetricData[className].ParameterTypes.AddRange(line);
+                        break;
+                     case "interfaces":
+                        ClassNameToMetricData[className].Interface = line.First();
+                        break;
+                     case "efferent_couplings":
+                        ClassNameToMetricData[className].EfferentCouplings.AddRange(line);
+                        break;
+                     case "metrics":
+                        ClassNameToMetricData[className].ConsumeMetrics(line);
+                        break;
                   }
-                  else if (analysisType == "methods")
-                  {
-                     NumberOfMethods += int.Parse(line[0]);
-                  }
+               }
+            }
+
+            // Convert all concrete classes to interfaces in XML (efferent coupling will observe the interface, not the class)
+            foreach (var xmlConcreteClass in XmlConcreteClasses)
+            {
+               if (ClassNameToMetricData.ContainsKey(xmlConcreteClass))
+               {
+                  XmlInterfaces.Add(ClassNameToMetricData[xmlConcreteClass].Interface);
                }
             }
             
             // Analyze DiwCbo using classNames list
             foreach (var metricData in ClassNameToMetricData.Values)
             {
-               metricData.AnalyzeDependencyInjection(ClassNames);
+               metricData.AnalyzeDependencyInjection(ClassNames, XmlInterfaces);
                AccumulateMetrics(metricData);
             }
 
-            foreach (var metric in MetricTotals.Values)
-            {
-               metric.ComputeMean();
-            }
-            
-            var diProportion = MetricTotals["CBO"].Accumulator == 0
+            // DI proportion is the total couplings injected via DI divided by the total efferent couplings
+            var diProportion = MetricTotals["CE"].Accumulator == 0
                ? 0
-               : MetricTotals["DI_PARAMS"].Accumulator * 2 / MetricTotals["CBO"].Accumulator;
+               : MetricTotals["DI_PARAMS"].Accumulator / MetricTotals["CE"].Accumulator;
 
             // Normalize CBO using module complexity (CM) equation CM = 1 - (1 / (1 + IS)), where IS is coupling complexity
-            var normalizedCBO = 1 - (1 / (1 + MetricTotals["CBO"].Mean));
-            var normalizedDCBO = 1 - (1 / (1 + MetricTotals["DCBO"].Mean));
-            // Normalize LCOM with bestfit
-            var normalizedLCOM = MetricTotals["LCOM"].Mean < 1 ? 0 : 1.0 / MetricTotals["LCOM"].Mean;
-            // Normalize RFC using module complexity (CM) equation above
-            var normalizedRFC = 1 - (1 / (1 + MetricTotals["RFC"].Mean));
-
-            // Compute maintainability
-            var maintainability = ComputeMaintainability(normalizedCBO, normalizedLCOM, normalizedRFC);
-            var diMaintainability = ComputeMaintainability(normalizedDCBO, normalizedLCOM, normalizedRFC);
+            var normalizedCBO = 1 - (1 / (1 + MetricTotals["CBO"].ComputeMean()));
+            var normalizedDCBO = 1 - (1 / (1 + MetricTotals["DCBO"].ComputeMean()));
 
             var newLine =
-               $"{project.Split("\\").Last()},{diProportion.ToString(CultureInfo.InvariantCulture)},{maintainability.ToString(CultureInfo.InvariantCulture)},{diMaintainability.ToString(CultureInfo.InvariantCulture)},{MetricTotals["LOC"].Accumulator.ToString(CultureInfo.InvariantCulture)},{MetricTotals["CBO"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DCBO"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["LCOM"].Mean.ToString(CultureInfo.InvariantCulture)},{MetricTotals["RFC"].Mean.ToString(CultureInfo.InvariantCulture)},{normalizedCBO.ToString(CultureInfo.InvariantCulture)},{normalizedDCBO.ToString(CultureInfo.InvariantCulture)},{normalizedLCOM.ToString(CultureInfo.InvariantCulture)},{normalizedRFC.ToString(CultureInfo.InvariantCulture)}";
+               $"{project.Split("\\").Last()},{diProportion.ToString(CultureInfo.InvariantCulture)},{MetricTotals["LOC"].Accumulator.ToString(CultureInfo.InvariantCulture)},{MetricTotals["CBO"].ComputeMean().ToString(CultureInfo.InvariantCulture)},{normalizedCBO.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DCBO"].ComputeMean().ToString(CultureInfo.InvariantCulture)},{normalizedDCBO.ToString(CultureInfo.InvariantCulture)},{MetricTotals["CA"].ComputeMean().ToString(CultureInfo.InvariantCulture)},{MetricTotals["CE"].ComputeMean().ToString(CultureInfo.InvariantCulture)},{MetricTotals["DCE"].ComputeMean().ToString(CultureInfo.InvariantCulture)}";
 
             csv.AppendLine(newLine);
          }
@@ -140,128 +152,38 @@ namespace CKJMAnalyzer
       }
 
       public static Dictionary<string, MetricData> ClassNameToMetricData { get; set; } = new();
+      public static List<string> XmlConcreteClasses { get; set; } = new();
+      public static List<string> XmlInterfaces { get; set; } = new();
       public static List<string> ClassNames { get; set; } = new();
       public static Dictionary<string, Metric> MetricTotals { get; set; } = new();
-      public static double NumberOfMethods { get; set; } = 0;
 
       public static void Initialize()
       {
          ClassNameToMetricData.Clear();
          ClassNames.Clear();
          MetricTotals.Clear();
-         NumberOfMethods = 0;
+         MetricTotals["CA"] = new Metric("CA");
+         MetricTotals["CE"] = new Metric("CE");
+         MetricTotals["DCE"] = new Metric("DCE");
          MetricTotals["CBO"] = new Metric("CBO");
          MetricTotals["LOC"] = new Metric("LOC");
          MetricTotals["DCBO"] = new Metric("DCBO");
          MetricTotals["LCOM"] = new Metric("LCOM");
          MetricTotals["RFC"] = new Metric("RFC");
          MetricTotals["DI_PARAMS"] = new Metric("DI_PARAMS");
-         MetricTotals["TOTAL_PARAMS"] = new Metric("TOTAL_PARAMS");
       }
 
       public static void AccumulateMetrics(MetricData data)
       {
+         MetricTotals["CA"].Add(data.MetricNameValue["CA"]);
+         MetricTotals["CE"].Add(data.MetricNameValue["CE"]);
+         MetricTotals["DCE"].Add(data.DCe);
          MetricTotals["CBO"].Add(data.MetricNameValue["CBO"]);
          MetricTotals["LOC"].Add(data.MetricNameValue["LOC"]);
-         MetricTotals["DCBO"].Add(data.DiwCbo);
+         MetricTotals["DCBO"].Add(data.DCbo);
          MetricTotals["LCOM"].Add(data.MetricNameValue["LCOM"]);
          MetricTotals["RFC"].Add(data.MetricNameValue["RFC"]);
-         MetricTotals["DI_PARAMS"].Add(data.DiParams);
-         MetricTotals["TOTAL_PARAMS"].Add(data.MethodParams.Count);
-      }
-
-      public static double ComputeMaintainability(double nCbo, double nLcom, double nRfc)
-      {
-         return 1 - (nCbo / 3) - (nLcom / 3) - (nRfc / 3);
-      }
-
-      public class Metric
-      {
-         public string MetricName { get; set; }
-         public double Accumulator { get; set; }
-         public double Count { get; set; }
-         public double Mean { get; set; }
-
-         public Metric(string name)
-         {
-            MetricName = name;
-            Accumulator = 0;
-            Count = 0;
-         }
-      
-         public void Add(double value)
-         {
-            Accumulator += value;
-            ++Count;
-         }
-
-         public void ComputeMean()
-         {
-            Mean = Accumulator / Count;
-         }
-      }
-
-      public class MetricData
-      {
-         public Dictionary<string, double> MetricNameValue { get; set; } = new();
-         public double DiwCbo { get; set; }
-         public double DiParams { get; set; }
-         public List<string> MethodParams { get; set; } = new();
-
-         public void AddParams(List<string> para)
-         {
-            MethodParams = para;
-         }
-
-         public void ConsumeMetrics(List<string> metrics)
-         {
-            // Weighted methods per class
-            MetricNameValue["WMC_NOM"] = double.Parse(metrics[0]);
-            // Depth of inheritance tree
-            MetricNameValue["DIT"] = double.Parse(metrics[1]);
-            // Number of children
-            MetricNameValue["NOC"] = double.Parse(metrics[2]);
-            // Coupling between objects
-            MetricNameValue["CBO"] = double.Parse(metrics[3]);
-            // Response for class
-            MetricNameValue["RFC"] = double.Parse(metrics[4]);
-            // Lack of cohesion in methods
-            MetricNameValue["LCOM"] = double.Parse(metrics[5]);
-            // Afferent couplings
-            MetricNameValue["CA"] = double.Parse(metrics[6]);
-            // Efferent couplings
-            MetricNameValue["CE"] = double.Parse(metrics[7]);
-            // Number of public methods
-            MetricNameValue["NPM"] = double.Parse(metrics[8]);
-            // Lack of cohesion in methods varying between 0 and 2
-            MetricNameValue["LCOM3"] = double.Parse(metrics[9]);
-            // Lines of code
-            MetricNameValue["LOC"] = double.Parse(metrics[10]);
-            // Data access metric
-            MetricNameValue["DAM"] = double.Parse(metrics[11]);
-            // Measure of aggregation
-            MetricNameValue["MOA"] = double.Parse(metrics[12]);
-            // Measure of functional abstraction
-            MetricNameValue["MFA"] = double.Parse(metrics[13]);
-            // Cohesion among methods of classes
-            MetricNameValue["CAM"] = double.Parse(metrics[14]);
-            // Inheritance coupling
-            MetricNameValue["IC"] = double.Parse(metrics[15]);
-            // Coupling between methods
-            MetricNameValue["CBM"] = double.Parse(metrics[16]);
-            // Average method complexity
-            MetricNameValue["AMC"] = double.Parse(metrics[17]);
-         }
-
-         public void AnalyzeDependencyInjection(List<string> classNames)
-         {
-            // Intersect params with classNames
-            var nonPrimitiveParams = MethodParams.Intersect(classNames).ToList();
-            // Remove duplicates
-            nonPrimitiveParams = nonPrimitiveParams.Distinct().ToList();
-            DiwCbo = MetricNameValue["CBO"] - nonPrimitiveParams.Count;
-            DiParams = nonPrimitiveParams.Count;
-         }
+         MetricTotals["DI_PARAMS"].Add(data.DIParamCount);
       }
    }
 }
