@@ -129,6 +129,10 @@ namespace CKJMAnalyzer
             // Analyze DiwCbo using classNames list
             foreach (var metricData in ClassNameToMetricData.Values)
             {
+               if (metricData.MetricNameValue.Count == 0)
+               {
+                  continue;
+               }
                metricData.AnalyzeDependencyInjection(ClassNames, XmlInterfaces);
                AccumulateMetrics(metricData);
             }
@@ -139,11 +143,12 @@ namespace CKJMAnalyzer
                : MetricTotals["DI_PARAMS"].Accumulator / MetricTotals["CE"].Accumulator;
 
             // Normalize CBO using module complexity (CM) equation CM = 1 - (1 / (1 + IS)), where IS is coupling complexity
-            var normalizedCBO = 1 - (1 / (1 + MetricTotals["CBO"].ComputeMean()));
+            var totalCBO = MetricTotals["CA"].ComputeMean() + MetricTotals["CE"].ComputeMean();
+            var normalizedCBO = 1 - (1 / (1 + totalCBO));
             var normalizedDCBO = 1 - (1 / (1 + MetricTotals["DCBO"].ComputeMean()));
 
             var newLine =
-               $"{project.Split("\\").Last()},{diProportion.ToString(CultureInfo.InvariantCulture)},{MetricTotals["LOC"].Accumulator.ToString(CultureInfo.InvariantCulture)},{MetricTotals["CBO"].ComputeMean().ToString(CultureInfo.InvariantCulture)},{normalizedCBO.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DCBO"].ComputeMean().ToString(CultureInfo.InvariantCulture)},{normalizedDCBO.ToString(CultureInfo.InvariantCulture)},{MetricTotals["CA"].ComputeMean().ToString(CultureInfo.InvariantCulture)},{MetricTotals["CE"].ComputeMean().ToString(CultureInfo.InvariantCulture)},{MetricTotals["DCE"].ComputeMean().ToString(CultureInfo.InvariantCulture)}";
+               $"{project.Split("\\").Last()},{diProportion.ToString(CultureInfo.InvariantCulture)},{MetricTotals["LOC"].Accumulator.ToString(CultureInfo.InvariantCulture)},{totalCBO.ToString(CultureInfo.InvariantCulture)},{normalizedCBO.ToString(CultureInfo.InvariantCulture)},{MetricTotals["DCBO"].ComputeMean().ToString(CultureInfo.InvariantCulture)},{normalizedDCBO.ToString(CultureInfo.InvariantCulture)},{MetricTotals["CA"].ComputeMean().ToString(CultureInfo.InvariantCulture)},{MetricTotals["CE"].ComputeMean().ToString(CultureInfo.InvariantCulture)},{MetricTotals["DCE"].ComputeMean().ToString(CultureInfo.InvariantCulture)}";
 
             csv.AppendLine(newLine);
          }
